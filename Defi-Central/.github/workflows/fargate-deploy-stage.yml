@@ -1,0 +1,101 @@
+on:
+  push:
+    branches:
+      - main
+
+name: Deploy-Fargate-Stage
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: defi-central
+  ECS_SERVICE: defi-central-stage
+  ECS_CLUSTER: default
+  ECS_TASK_FAMILY: defi-central-stage
+  CONTAINER_NAME: defi-central-stage
+  ECS_SERVICE_WALLET: defi-central-stage
+
+jobs:
+  Build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:defi-central-${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_SECRET_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+          mask-aws-account-id: no
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        uses: docker/build-push-action@v3
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: defi-central-stage-${{ github.sha }}
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ env.IMAGE_TAG }}
+
+  Deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    needs: Build
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_SECRET_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ secrets.ECS_TASK_DEFINITION_STAGING }}
+          container-name: ${{ secrets.CONTAINER_NAME_STAGING }}
+          image: ${{ needs.Build.outputs.image }}
+
+      - name: Deploy Amazon ECS task definition
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ${{ steps.task-def.outputs.task-definition }}
+          service: ${{ secrets.ECS_SERVICE_STAGING }}
+          cluster: ${{ secrets.ECS_CLUSTER }}
+          wait-for-service-stability: true
+
+      ### Updates ecom-database-wallet-stage
+      - name: Fill in the new image ID in the Amazon ECS task definition
+        id: task-def-wallet
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: ${{ env.ECS_TASK_DEFINITION_WALLET }}
+          container-name: ${{ env.CONTAINER_NAME_WALLET }}
+          image: ${{ needs.Build.outputs.image }}
+          environment-variables: |
+            AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+            AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+            PG_HOST=${{ secrets.RDS_STAGING_HOST }}
+            PG_DB=${{ secrets.RDS_PG_DB }}
+            PG_USER=${{ secrets.RDS_STAGING_USER }}
+            PG_PASSWORD=${{ secrets.RDS_STAGING_PASSWORD }}
+            PG_PORT=${{ secrets.PG_PORT }}
+            BASE_URL=${{ secrets.BASE_URL }}
+            DFUSE_API_KEY=${{ secrets.DFUSE_API_KEY }}
+            ETH_ALCHEMY_URL=${{ secrets.ETH_ALCHEMY_URL }} 
+            POLYGON_ALCHEMY_URL=${{ secrets.POLYGON_ALCHEMY_URL }}
