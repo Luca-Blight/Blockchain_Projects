@@ -1,0 +1,46 @@
+version: '3.9'
+
+services:
+  printenv:
+    image: alpine
+    command: /bin/sh -c "echo 'PG_HOST=${PG_HOST}'; echo 'PG_PORT=${PG_PORT}'; echo 'PG_USER=${PG_USER}'; echo 'PG_PASSWORD=${PG_PASSWORD}'; echo 'PG_DB=${PG_DB}'"
+    env_file:
+      - .env
+
+  api:
+    image: 954247117315.dkr.ecr.us-east-1.amazonaws.com/api:latest
+    ports:
+      - '8000:8000'
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+
+  indexer:
+    image: 954247117315.dkr.ecr.us-east-1.amazonaws.com/indexer:latest
+    env_file:
+      - .env
+    environment:
+      - TOTAL_SUPPLY=16969696969
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:14.1-alpine
+    ports:
+      - '5432:5432'
+    env_file:
+      - .env
+    environment:
+      - POSTGRES_USER=${PG_USER}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
+      - POSTGRES_DB=${PG_DB}
+      - POSTGRES_HOST=${PG_HOST}
+      - POSTGRES_PORT=${PG_PORT}
+    volumes:
+      - db:/var/lib/postgresql/data
+    command: -p 5432
+
+volumes:
+  db:
+    driver: local
